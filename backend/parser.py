@@ -115,15 +115,30 @@ def get_project_dirs() -> List[Path]:
     return sorted(dirs, key=lambda x: x.name)
 
 
-def get_session_files(project_dir: Path) -> List[Path]:
-    """获取项目目录下的所有会话文件"""
+def get_session_files(project_dir: Path, include_agents: bool = False) -> List[Path]:
+    """获取项目目录下的所有会话文件
+
+    Args:
+        project_dir: 项目目录
+        include_agents: 是否包含 agent-* 子代理文件（用于 token 统计）
+    """
     files = []
     for item in project_dir.iterdir():
         if item.is_file() and item.suffix == ".jsonl":
-            # 排除 agent- 开头的子 agent 文件
-            if not item.stem.startswith("agent-"):
+            # 排除 agent- 开头的子 agent 文件（除非明确要包含）
+            if include_agents or not item.stem.startswith("agent-"):
                 files.append(item)
     return sorted(files, key=lambda x: x.stat().st_mtime, reverse=True)
+
+
+def get_all_jsonl_files() -> List[Path]:
+    """获取所有 JSONL 文件（包括 agent 文件和子目录），用于 token 统计"""
+    files = []
+    for project_dir in get_project_dirs():
+        # 递归查找所有 .jsonl 文件
+        for jsonl_file in project_dir.rglob("*.jsonl"):
+            files.append(jsonl_file)
+    return files
 
 
 def project_path_to_name(encoded_path: str) -> str:
@@ -366,29 +381,43 @@ def get_all_projects() -> List[Project]:
 
 
 # Claude 模型定价 (per token)
+# 数据来源: https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
+# 更新日期: 2026-01-26
+# 超过 200K tokens 的部分使用 *_above_200k 价格
+TIERED_THRESHOLD = 200_000  # 200K tokens
+
 MODEL_PRICING = {
-    # Sonnet 4.5
+    # Opus 4.5 ($5/$25 per MTok)
+    "claude-opus-4-5-20251101": {
+        "input": 5e-6,
+        "output": 25e-6,
+        "cache_creation": 6.25e-6,
+        "cache_read": 0.5e-6,
+    },
+    # Sonnet 4.5 ($3/$15 per MTok, 分层定价)
     "claude-sonnet-4-5-20250929": {
         "input": 3e-6,
         "output": 15e-6,
         "cache_creation": 3.75e-6,
         "cache_read": 0.3e-6,
+        # 超过 200K 的价格
+        "input_above_200k": 6e-6,
+        "output_above_200k": 22.5e-6,
+        "cache_creation_above_200k": 7.5e-6,
+        "cache_read_above_200k": 0.6e-6,
     },
-    # Opus 4.5
-    "claude-opus-4-5-20251101": {
-        "input": 15e-6,
-        "output": 75e-6,
-        "cache_creation": 18.75e-6,
-        "cache_read": 1.5e-6,
-    },
-    # Sonnet 4
+    # Sonnet 4 ($3/$15 per MTok, 分层定价)
     "claude-sonnet-4-20250514": {
         "input": 3e-6,
         "output": 15e-6,
         "cache_creation": 3.75e-6,
         "cache_read": 0.3e-6,
+        "input_above_200k": 6e-6,
+        "output_above_200k": 22.5e-6,
+        "cache_creation_above_200k": 7.5e-6,
+        "cache_read_above_200k": 0.6e-6,
     },
-    # Haiku
+    # Haiku 3.5 ($0.8/$4 per MTok)
     "claude-3-5-haiku-20241022": {
         "input": 0.8e-6,
         "output": 4e-6,
@@ -401,6 +430,10 @@ MODEL_PRICING = {
         "output": 15e-6,
         "cache_creation": 3.75e-6,
         "cache_read": 0.3e-6,
+        "input_above_200k": 6e-6,
+        "output_above_200k": 22.5e-6,
+        "cache_creation_above_200k": 7.5e-6,
+        "cache_read_above_200k": 0.6e-6,
     }
 }
 
@@ -434,8 +467,27 @@ def get_model_pricing(model: str) -> dict:
     return MODEL_PRICING["default"]
 
 
+def calculate_tiered_cost(tokens: int, base_price: float, above_200k_price: float = None) -> float:
+    """计算分层定价成本
+
+    如果 tokens 超过 200K 且有分层价格，则：
+    - 前 200K tokens 使用 base_price
+    - 超出部分使用 above_200k_price
+    """
+    if tokens <= 0:
+        return 0.0
+
+    if above_200k_price is None or tokens <= TIERED_THRESHOLD:
+        return tokens * base_price
+
+    # 分层计算
+    base_cost = TIERED_THRESHOLD * base_price
+    above_cost = (tokens - TIERED_THRESHOLD) * above_200k_price
+    return base_cost + above_cost
+
+
 def calculate_cost(usage: dict, model: str) -> float:
-    """计算 token 成本"""
+    """计算 token 成本（支持 200K 分层定价）"""
     pricing = get_model_pricing(model)
     input_tokens = usage.get("input_tokens", 0)
     output_tokens = usage.get("output_tokens", 0)
@@ -443,10 +495,10 @@ def calculate_cost(usage: dict, model: str) -> float:
     cache_read = usage.get("cache_read_input_tokens", 0)
 
     cost = (
-        input_tokens * pricing["input"] +
-        output_tokens * pricing["output"] +
-        cache_creation * pricing["cache_creation"] +
-        cache_read * pricing["cache_read"]
+        calculate_tiered_cost(input_tokens, pricing["input"], pricing.get("input_above_200k")) +
+        calculate_tiered_cost(output_tokens, pricing["output"], pricing.get("output_above_200k")) +
+        calculate_tiered_cost(cache_creation, pricing["cache_creation"], pricing.get("cache_creation_above_200k")) +
+        calculate_tiered_cost(cache_read, pricing["cache_read"], pricing.get("cache_read_above_200k"))
     )
     return cost
 
@@ -464,62 +516,62 @@ def get_usage_summary() -> UsageSummary:
     month_usage = TokenUsage()
     total_usage = TokenUsage()
 
-    for project_dir in get_project_dirs():
-        for session_file in get_session_files(project_dir):
-            records = parse_jsonl_file(session_file)
+    # 遍历所有 JSONL 文件（包括 agent 子文件）
+    for jsonl_file in get_all_jsonl_files():
+        records = parse_jsonl_file(jsonl_file)
 
-            for record in records:
-                if record.get("type") != "assistant":
-                    continue
+        for record in records:
+            if record.get("type") != "assistant":
+                continue
 
-                msg = record.get("message", {})
-                usage = msg.get("usage", {})
-                if not usage:
-                    continue
+            msg = record.get("message", {})
+            usage = msg.get("usage", {})
+            if not usage:
+                continue
 
-                model = msg.get("model", "")
-                timestamp_str = record.get("timestamp", "")
-                if not timestamp_str:
-                    continue
+            model = msg.get("model", "")
+            timestamp_str = record.get("timestamp", "")
+            if not timestamp_str:
+                continue
 
-                try:
-                    # 将 UTC 时间转换为本地时间
-                    ts_utc = parse_timestamp(timestamp_str)
-                    if ts_utc.tzinfo is None:
-                        ts_utc = ts_utc.replace(tzinfo=timezone.utc)
-                    ts_local = ts_utc.astimezone()
-                    ts = ts_local.date()
-                except:
-                    continue
+            try:
+                # 将 UTC 时间转换为本地时间
+                ts_utc = parse_timestamp(timestamp_str)
+                if ts_utc.tzinfo is None:
+                    ts_utc = ts_utc.replace(tzinfo=timezone.utc)
+                ts_local = ts_utc.astimezone()
+                ts = ts_local.date()
+            except:
+                continue
 
-                input_tokens = usage.get("input_tokens", 0)
-                output_tokens = usage.get("output_tokens", 0)
-                cache_creation = usage.get("cache_creation_input_tokens", 0)
-                cache_read = usage.get("cache_read_input_tokens", 0)
-                cost = calculate_cost(usage, model)
+            input_tokens = usage.get("input_tokens", 0)
+            output_tokens = usage.get("output_tokens", 0)
+            cache_creation = usage.get("cache_creation_input_tokens", 0)
+            cache_read = usage.get("cache_read_input_tokens", 0)
+            cost = calculate_cost(usage, model)
 
-                # 总计
-                total_usage.input_tokens += input_tokens
-                total_usage.output_tokens += output_tokens
-                total_usage.cache_creation_tokens += cache_creation
-                total_usage.cache_read_tokens += cache_read
-                total_usage.cost_usd += cost
+            # 总计
+            total_usage.input_tokens += input_tokens
+            total_usage.output_tokens += output_tokens
+            total_usage.cache_creation_tokens += cache_creation
+            total_usage.cache_read_tokens += cache_read
+            total_usage.cost_usd += cost
 
-                # 本月
-                if ts >= first_of_month:
-                    month_usage.input_tokens += input_tokens
-                    month_usage.output_tokens += output_tokens
-                    month_usage.cache_creation_tokens += cache_creation
-                    month_usage.cache_read_tokens += cache_read
-                    month_usage.cost_usd += cost
+            # 本月
+            if ts >= first_of_month:
+                month_usage.input_tokens += input_tokens
+                month_usage.output_tokens += output_tokens
+                month_usage.cache_creation_tokens += cache_creation
+                month_usage.cache_read_tokens += cache_read
+                month_usage.cost_usd += cost
 
-                # 今日
-                if ts == today:
-                    today_usage.input_tokens += input_tokens
-                    today_usage.output_tokens += output_tokens
-                    today_usage.cache_creation_tokens += cache_creation
-                    today_usage.cache_read_tokens += cache_read
-                    today_usage.cost_usd += cost
+            # 今日
+            if ts == today:
+                today_usage.input_tokens += input_tokens
+                today_usage.output_tokens += output_tokens
+                today_usage.cache_creation_tokens += cache_creation
+                today_usage.cache_read_tokens += cache_read
+                today_usage.cost_usd += cost
 
     # 计算 total_tokens
     today_usage.total_tokens = (today_usage.input_tokens + today_usage.output_tokens +
@@ -561,58 +613,58 @@ def get_usage_detail(days: int = 30) -> UsageDetail:
     today = datetime.now().date()
     cutoff_date = today - timedelta(days=days)
 
-    for project_dir in get_project_dirs():
-        for session_file in get_session_files(project_dir):
-            records = parse_jsonl_file(session_file)
+    # 遍历所有 JSONL 文件（包括 agent 子文件）
+    for jsonl_file in get_all_jsonl_files():
+        records = parse_jsonl_file(jsonl_file)
 
-            for record in records:
-                if record.get("type") != "assistant":
-                    continue
+        for record in records:
+            if record.get("type") != "assistant":
+                continue
 
-                msg = record.get("message", {})
-                usage = msg.get("usage", {})
-                if not usage:
-                    continue
+            msg = record.get("message", {})
+            usage = msg.get("usage", {})
+            if not usage:
+                continue
 
-                model = normalize_model_name(msg.get("model", "unknown"))
-                timestamp_str = record.get("timestamp", "")
-                if not timestamp_str:
-                    continue
+            model = normalize_model_name(msg.get("model", "unknown"))
+            timestamp_str = record.get("timestamp", "")
+            if not timestamp_str:
+                continue
 
-                try:
-                    # 将 UTC 时间转换为本地时间
-                    ts_utc = parse_timestamp(timestamp_str)
-                    if ts_utc.tzinfo is None:
-                        ts_utc = ts_utc.replace(tzinfo=timezone.utc)
-                    ts_local = ts_utc.astimezone()
-                    ts_date = ts_local.date()
-                except:
-                    continue
+            try:
+                # 将 UTC 时间转换为本地时间
+                ts_utc = parse_timestamp(timestamp_str)
+                if ts_utc.tzinfo is None:
+                    ts_utc = ts_utc.replace(tzinfo=timezone.utc)
+                ts_local = ts_utc.astimezone()
+                ts_date = ts_local.date()
+            except:
+                continue
 
-                if ts_date < cutoff_date:
-                    continue
+            if ts_date < cutoff_date:
+                continue
 
-                date_str = ts_date.isoformat()
-                input_tokens = usage.get("input_tokens", 0)
-                output_tokens = usage.get("output_tokens", 0)
-                cache_creation = usage.get("cache_creation_input_tokens", 0)
-                cache_read = usage.get("cache_read_input_tokens", 0)
-                cost = calculate_cost(usage, model)
+            date_str = ts_date.isoformat()
+            input_tokens = usage.get("input_tokens", 0)
+            output_tokens = usage.get("output_tokens", 0)
+            cache_creation = usage.get("cache_creation_input_tokens", 0)
+            cache_read = usage.get("cache_read_input_tokens", 0)
+            cost = calculate_cost(usage, model)
 
-                # 按日统计
-                daily_data[date_str]["models"].add(model)
-                daily_data[date_str]["input_tokens"] += input_tokens
-                daily_data[date_str]["output_tokens"] += output_tokens
-                daily_data[date_str]["cache_creation_tokens"] += cache_creation
-                daily_data[date_str]["cache_read_tokens"] += cache_read
-                daily_data[date_str]["cost_usd"] += cost
+            # 按日统计
+            daily_data[date_str]["models"].add(model)
+            daily_data[date_str]["input_tokens"] += input_tokens
+            daily_data[date_str]["output_tokens"] += output_tokens
+            daily_data[date_str]["cache_creation_tokens"] += cache_creation
+            daily_data[date_str]["cache_read_tokens"] += cache_read
+            daily_data[date_str]["cost_usd"] += cost
 
-                # 按模型统计
-                model_data[model]["input_tokens"] += input_tokens
-                model_data[model]["output_tokens"] += output_tokens
-                model_data[model]["cache_creation_tokens"] += cache_creation
-                model_data[model]["cache_read_tokens"] += cache_read
-                model_data[model]["cost_usd"] += cost
+            # 按模型统计
+            model_data[model]["input_tokens"] += input_tokens
+            model_data[model]["output_tokens"] += output_tokens
+            model_data[model]["cache_creation_tokens"] += cache_creation
+            model_data[model]["cache_read_tokens"] += cache_read
+            model_data[model]["cost_usd"] += cost
 
     # 转换为列表并排序
     daily_usage = []
