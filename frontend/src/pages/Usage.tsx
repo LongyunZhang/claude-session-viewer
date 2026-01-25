@@ -77,6 +77,14 @@ export function Usage() {
                 Token 使用统计
               </h1>
             </div>
+            <a
+              href="https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-auto text-xs text-gray-400 hover:text-gray-600"
+            >
+              定价来源: LiteLLM (2026-01-26)
+            </a>
           </div>
         </div>
       </header>

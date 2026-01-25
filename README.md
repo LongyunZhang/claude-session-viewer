@@ -21,7 +21,8 @@
 - **Token 用量统计** - 类似 ccusage 的 Token 消耗统计
   - 首页侧边栏摘要：今日、本月、总计用量及费用
   - 详情页：按日期统计、按模型统计
-  - 支持手动刷新，5 分钟缓存
+  - 支持手动刷新，10 分钟缓存
+  - 支持 200K 分层定价
 
 ## 技术栈
 
@@ -133,6 +134,54 @@ claude-session-viewer/
 └── file-history/       # 文件变更备份
     └── {session}/
         └── {hash}@v{n}
+```
+
+## Token 费用计算
+
+从会话文件的 `assistant` 消息中提取 `usage` 字段进行统计：
+
+```json
+{
+  "message": {
+    "model": "claude-opus-4-5-20251101",
+    "usage": {
+      "input_tokens": 10000,
+      "output_tokens": 500,
+      "cache_creation_input_tokens": 18627,
+      "cache_read_input_tokens": 50000
+    }
+  }
+}
+```
+
+### 定价表（每百万 tokens）
+
+> 数据来源: [LiteLLM Model Pricing](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json)
+>
+> 更新日期: 2026-01-26
+
+| 模型 | Input | Output | Cache Write | Cache Read |
+|------|-------|--------|-------------|------------|
+| Opus 4.5 | $5 | $25 | $6.25 | $0.50 |
+| Sonnet 4.5/4 | $3 | $15 | $3.75 | $0.30 |
+| Haiku 3.5 | $0.80 | $4 | $1 | $0.08 |
+
+### 200K 分层定价
+
+Sonnet 模型超过 200K tokens 的部分使用更高价格：
+
+| 模型 | Input (>200K) | Output (>200K) | Cache Write (>200K) | Cache Read (>200K) |
+|------|---------------|----------------|---------------------|-------------------|
+| Sonnet 4.5/4 | $6 | $22.50 | $7.50 | $0.60 |
+
+### 计算公式
+
+```
+总费用 = Σ(每种 token 类型的费用)
+
+单类型费用 =
+  如果 tokens ≤ 200K: tokens × 基础价格
+  如果 tokens > 200K: 200K × 基础价格 + (tokens - 200K) × 分层价格
 ```
 
 ## 截图
