@@ -3,8 +3,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 
-from models import SessionSummary, SessionDetail, SearchResult, Project
-from parser import get_all_sessions, get_session_detail, search_sessions, get_all_projects
+from models import SessionSummary, SessionDetail, SearchResult, Project, UsageSummary, UsageDetail
+from parser import get_all_sessions, get_session_detail, search_sessions, get_all_projects, get_usage_summary, get_usage_detail
 
 app = FastAPI(
     title="Claude Session Viewer API",
@@ -67,6 +67,20 @@ def search(
 def list_projects():
     """获取项目列表"""
     return get_all_projects()
+
+
+@app.get("/api/usage/summary", response_model=UsageSummary)
+def usage_summary():
+    """获取使用量摘要：今日、本月、总计"""
+    return get_usage_summary()
+
+
+@app.get("/api/usage/detail", response_model=UsageDetail)
+def usage_detail(
+    days: int = Query(30, ge=1, le=365, description="统计天数")
+):
+    """获取详细使用量统计"""
+    return get_usage_detail(days)
 
 
 if __name__ == "__main__":

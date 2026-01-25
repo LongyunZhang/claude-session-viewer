@@ -11,15 +11,18 @@ export function cn(...inputs: ClassValue[]) {
 export function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
   const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
-  if (days === 0) {
+  // 使用日历天比较，而不是原始时间差
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const targetDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.floor((today.getTime() - targetDay.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) {
     return '今天 ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-  } else if (days === 1) {
+  } else if (diffDays === 1) {
     return '昨天 ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-  } else if (days < 7) {
-    return `${days}天前`;
+  } else if (diffDays < 7) {
+    return `${diffDays}天前`;
   } else {
     return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
   }
