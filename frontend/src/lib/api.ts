@@ -68,6 +68,44 @@ export interface Project {
   session_count: number;
 }
 
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_tokens: number;
+  cache_read_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+}
+
+export interface DailyUsage {
+  date: string;
+  models: string[];
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_tokens: number;
+  cache_read_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+}
+
+export interface UsageSummary {
+  today: TokenUsage;
+  this_month: TokenUsage;
+  total: TokenUsage;
+}
+
+export interface UsageDetail {
+  daily_usage: DailyUsage[];
+  by_model: Record<string, {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_tokens: number;
+    cache_read_tokens: number;
+    total_tokens: number;
+    cost_usd: number;
+  }>;
+}
+
 /**
  * 获取会话列表
  */
@@ -106,5 +144,23 @@ export async function searchSessions(query: string): Promise<SearchResult[]> {
 export async function getProjects(): Promise<Project[]> {
   const response = await fetch(`${API_BASE}/projects`);
   if (!response.ok) throw new Error('Failed to fetch projects');
+  return response.json();
+}
+
+/**
+ * 获取使用量摘要
+ */
+export async function getUsageSummary(): Promise<UsageSummary> {
+  const response = await fetch(`${API_BASE}/usage/summary`);
+  if (!response.ok) throw new Error('Failed to fetch usage summary');
+  return response.json();
+}
+
+/**
+ * 获取详细使用量统计
+ */
+export async function getUsageDetail(days: number = 30): Promise<UsageDetail> {
+  const response = await fetch(`${API_BASE}/usage/detail?days=${days}`);
+  if (!response.ok) throw new Error('Failed to fetch usage detail');
   return response.json();
 }

@@ -7,6 +7,7 @@ import { ViewModeSwitch, type ViewMode } from '../components/ViewModeSwitch';
 import { TimelineView } from '../components/TimelineView';
 import { TimelineNav } from '../components/TimelineNav';
 import { HighlightText } from '../components/HighlightText';
+import { UsageStats } from '../components/UsageStats';
 import {
   getSessions,
   getProjects,
@@ -132,6 +133,9 @@ export function Home() {
         <div className="flex gap-6">
           {/* 侧边栏 - 视图切换 & 项目筛选 */}
           <aside className="w-64 flex-shrink-0 space-y-4 sticky top-28 self-start max-h-[calc(100vh-8rem)] overflow-y-auto">
+            {/* Token 统计 */}
+            <UsageStats />
+
             {/* 视图模式切换 */}
             <div className="bg-white rounded-lg border border-gray-200 p-4">
               <h2 className="text-sm font-medium text-gray-700 mb-3">

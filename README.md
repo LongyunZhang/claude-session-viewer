@@ -18,6 +18,10 @@
   - WebFetch/WebSearch：URL 预览 + 结果展示
 - **文件变更追踪** - 查看每个会话修改了哪些文件
 - **一键复制** - Claude 回复支持一键复制
+- **Token 用量统计** - 类似 ccusage 的 Token 消耗统计
+  - 首页侧边栏摘要：今日、本月、总计用量及费用
+  - 详情页：按日期统计、按模型统计
+  - 支持手动刷新，5 分钟缓存
 
 ## 技术栈
 
@@ -37,7 +41,7 @@
 ### 方式一：一键启动（推荐）
 
 ```bash
-# 克隆项目
+# 克隆后进入项目
 cd claude-session-viewer
 
 # 一键启动（自动安装依赖、启动前后端、打开浏览器）
@@ -92,8 +96,13 @@ claude-session-viewer/
 │   │   │   ├── DiffViewer.tsx      # Git Diff 视图
 │   │   │   ├── CodeViewer.tsx      # 代码查看器
 │   │   │   ├── TimelineView.tsx    # 时间线视图
+│   │   │   ├── UsageStats.tsx      # Token 用量统计
 │   │   │   └── ...
 │   │   ├── pages/           # 页面组件
+│   │   │   ├── Home.tsx            # 首页
+│   │   │   ├── Session.tsx         # 会话详情页
+│   │   │   ├── Usage.tsx           # Token 用量详情页
+│   │   │   └── ...
 │   │   └── lib/             # 工具函数和 API
 │   └── package.json
 ├── start.sh                 # 一键启动脚本
@@ -109,6 +118,8 @@ claude-session-viewer/
 | GET | `/api/sessions/{id}` | 获取会话详情 |
 | GET | `/api/search?q=keyword` | 全文搜索 |
 | GET | `/api/projects` | 获取项目列表 |
+| GET | `/api/usage/summary` | Token 用量摘要（今日/本月/总计） |
+| GET | `/api/usage/detail?days=30` | Token 用量详情（按日期/模型统计） |
 
 ## 数据来源
 
@@ -134,6 +145,9 @@ claude-session-viewer/
 
 ### 搜索功能
 ![搜索功能](docs/search.png)
+
+### Token 用量统计
+![Token统计](docs/usage.png)
 
 ## 开发计划
 

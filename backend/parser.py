@@ -8,8 +8,11 @@ from dateutil import parser as date_parser
 
 from models import (
     Message, FileChange, SessionSummary, SessionDetail,
-    SearchResult, Project, ToolCall
+    SearchResult, Project, ToolCall, TokenUsage, DailyUsage,
+    UsageSummary, UsageDetail
 )
+from collections import defaultdict
+from datetime import date, timedelta
 
 
 # Claude Code 数据目录
@@ -360,3 +363,285 @@ def get_all_projects() -> List[Project]:
 
     projects.sort(key=lambda x: x.session_count, reverse=True)
     return projects
+
+
+# Claude 模型定价 (per token)
+MODEL_PRICING = {
+    # Sonnet 4.5
+    "claude-sonnet-4-5-20250929": {
+        "input": 3e-6,
+        "output": 15e-6,
+        "cache_creation": 3.75e-6,
+        "cache_read": 0.3e-6,
+    },
+    # Opus 4.5
+    "claude-opus-4-5-20251101": {
+        "input": 15e-6,
+        "output": 75e-6,
+        "cache_creation": 18.75e-6,
+        "cache_read": 1.5e-6,
+    },
+    # Sonnet 4
+    "claude-sonnet-4-20250514": {
+        "input": 3e-6,
+        "output": 15e-6,
+        "cache_creation": 3.75e-6,
+        "cache_read": 0.3e-6,
+    },
+    # Haiku
+    "claude-3-5-haiku-20241022": {
+        "input": 0.8e-6,
+        "output": 4e-6,
+        "cache_creation": 1e-6,
+        "cache_read": 0.08e-6,
+    },
+    # Fallback default pricing (Sonnet)
+    "default": {
+        "input": 3e-6,
+        "output": 15e-6,
+        "cache_creation": 3.75e-6,
+        "cache_read": 0.3e-6,
+    }
+}
+
+
+def normalize_model_name(model: str) -> str:
+    """标准化模型名称，去除前缀"""
+    if not model:
+        return "unknown"
+    # 去除 pa/ 前缀
+    if model.startswith("pa/"):
+        model = model[3:]
+    # 去除 anthropic/ 前缀
+    if model.startswith("anthropic/"):
+        model = model[10:]
+    # 跳过 synthetic 等测试模型
+    if model.startswith("<") or model == "unknown":
+        return "unknown"
+    return model
+
+
+def get_model_pricing(model: str) -> dict:
+    """获取模型定价"""
+    model = normalize_model_name(model)
+    # 精确匹配
+    if model in MODEL_PRICING:
+        return MODEL_PRICING[model]
+    # 模糊匹配
+    for key in MODEL_PRICING:
+        if key in model or model in key:
+            return MODEL_PRICING[key]
+    return MODEL_PRICING["default"]
+
+
+def calculate_cost(usage: dict, model: str) -> float:
+    """计算 token 成本"""
+    pricing = get_model_pricing(model)
+    input_tokens = usage.get("input_tokens", 0)
+    output_tokens = usage.get("output_tokens", 0)
+    cache_creation = usage.get("cache_creation_input_tokens", 0)
+    cache_read = usage.get("cache_read_input_tokens", 0)
+
+    cost = (
+        input_tokens * pricing["input"] +
+        output_tokens * pricing["output"] +
+        cache_creation * pricing["cache_creation"] +
+        cache_read * pricing["cache_read"]
+    )
+    return cost
+
+
+def get_usage_summary() -> UsageSummary:
+    """获取使用量摘要：今日、本月、总计"""
+    from datetime import timezone
+
+    # 使用本地时区的今天日期
+    now_local = datetime.now()
+    today = now_local.date()
+    first_of_month = today.replace(day=1)
+
+    today_usage = TokenUsage()
+    month_usage = TokenUsage()
+    total_usage = TokenUsage()
+
+    for project_dir in get_project_dirs():
+        for session_file in get_session_files(project_dir):
+            records = parse_jsonl_file(session_file)
+
+            for record in records:
+                if record.get("type") != "assistant":
+                    continue
+
+                msg = record.get("message", {})
+                usage = msg.get("usage", {})
+                if not usage:
+                    continue
+
+                model = msg.get("model", "")
+                timestamp_str = record.get("timestamp", "")
+                if not timestamp_str:
+                    continue
+
+                try:
+                    # 将 UTC 时间转换为本地时间
+                    ts_utc = parse_timestamp(timestamp_str)
+                    if ts_utc.tzinfo is None:
+                        ts_utc = ts_utc.replace(tzinfo=timezone.utc)
+                    ts_local = ts_utc.astimezone()
+                    ts = ts_local.date()
+                except:
+                    continue
+
+                input_tokens = usage.get("input_tokens", 0)
+                output_tokens = usage.get("output_tokens", 0)
+                cache_creation = usage.get("cache_creation_input_tokens", 0)
+                cache_read = usage.get("cache_read_input_tokens", 0)
+                cost = calculate_cost(usage, model)
+
+                # 总计
+                total_usage.input_tokens += input_tokens
+                total_usage.output_tokens += output_tokens
+                total_usage.cache_creation_tokens += cache_creation
+                total_usage.cache_read_tokens += cache_read
+                total_usage.cost_usd += cost
+
+                # 本月
+                if ts >= first_of_month:
+                    month_usage.input_tokens += input_tokens
+                    month_usage.output_tokens += output_tokens
+                    month_usage.cache_creation_tokens += cache_creation
+                    month_usage.cache_read_tokens += cache_read
+                    month_usage.cost_usd += cost
+
+                # 今日
+                if ts == today:
+                    today_usage.input_tokens += input_tokens
+                    today_usage.output_tokens += output_tokens
+                    today_usage.cache_creation_tokens += cache_creation
+                    today_usage.cache_read_tokens += cache_read
+                    today_usage.cost_usd += cost
+
+    # 计算 total_tokens
+    today_usage.total_tokens = (today_usage.input_tokens + today_usage.output_tokens +
+                                today_usage.cache_creation_tokens + today_usage.cache_read_tokens)
+    month_usage.total_tokens = (month_usage.input_tokens + month_usage.output_tokens +
+                                month_usage.cache_creation_tokens + month_usage.cache_read_tokens)
+    total_usage.total_tokens = (total_usage.input_tokens + total_usage.output_tokens +
+                                total_usage.cache_creation_tokens + total_usage.cache_read_tokens)
+
+    return UsageSummary(
+        today=today_usage,
+        this_month=month_usage,
+        total=total_usage
+    )
+
+
+def get_usage_detail(days: int = 30) -> UsageDetail:
+    """获取详细使用量统计"""
+    from datetime import timezone
+
+    daily_data: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
+        "models": set(),
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "cost_usd": 0.0
+    })
+
+    model_data: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 0,
+        "cost_usd": 0.0
+    })
+
+    today = datetime.now().date()
+    cutoff_date = today - timedelta(days=days)
+
+    for project_dir in get_project_dirs():
+        for session_file in get_session_files(project_dir):
+            records = parse_jsonl_file(session_file)
+
+            for record in records:
+                if record.get("type") != "assistant":
+                    continue
+
+                msg = record.get("message", {})
+                usage = msg.get("usage", {})
+                if not usage:
+                    continue
+
+                model = normalize_model_name(msg.get("model", "unknown"))
+                timestamp_str = record.get("timestamp", "")
+                if not timestamp_str:
+                    continue
+
+                try:
+                    # 将 UTC 时间转换为本地时间
+                    ts_utc = parse_timestamp(timestamp_str)
+                    if ts_utc.tzinfo is None:
+                        ts_utc = ts_utc.replace(tzinfo=timezone.utc)
+                    ts_local = ts_utc.astimezone()
+                    ts_date = ts_local.date()
+                except:
+                    continue
+
+                if ts_date < cutoff_date:
+                    continue
+
+                date_str = ts_date.isoformat()
+                input_tokens = usage.get("input_tokens", 0)
+                output_tokens = usage.get("output_tokens", 0)
+                cache_creation = usage.get("cache_creation_input_tokens", 0)
+                cache_read = usage.get("cache_read_input_tokens", 0)
+                cost = calculate_cost(usage, model)
+
+                # 按日统计
+                daily_data[date_str]["models"].add(model)
+                daily_data[date_str]["input_tokens"] += input_tokens
+                daily_data[date_str]["output_tokens"] += output_tokens
+                daily_data[date_str]["cache_creation_tokens"] += cache_creation
+                daily_data[date_str]["cache_read_tokens"] += cache_read
+                daily_data[date_str]["cost_usd"] += cost
+
+                # 按模型统计
+                model_data[model]["input_tokens"] += input_tokens
+                model_data[model]["output_tokens"] += output_tokens
+                model_data[model]["cache_creation_tokens"] += cache_creation
+                model_data[model]["cache_read_tokens"] += cache_read
+                model_data[model]["cost_usd"] += cost
+
+    # 转换为列表并排序
+    daily_usage = []
+    for date_str, data in sorted(daily_data.items(), reverse=True):
+        total = (data["input_tokens"] + data["output_tokens"] +
+                 data["cache_creation_tokens"] + data["cache_read_tokens"])
+        # 过滤掉 unknown 模型
+        models = sorted([m for m in data["models"] if m != "unknown"])
+        daily_usage.append(DailyUsage(
+            date=date_str,
+            models=models,
+            input_tokens=data["input_tokens"],
+            output_tokens=data["output_tokens"],
+            cache_creation_tokens=data["cache_creation_tokens"],
+            cache_read_tokens=data["cache_read_tokens"],
+            total_tokens=total,
+            cost_usd=data["cost_usd"]
+        ))
+
+    # 处理模型统计（过滤掉 unknown）
+    by_model = {}
+    for model, data in model_data.items():
+        if model == "unknown":
+            continue
+        data["total_tokens"] = (data["input_tokens"] + data["output_tokens"] +
+                                data["cache_creation_tokens"] + data["cache_read_tokens"])
+        by_model[model] = data
+
+    return UsageDetail(
+        daily_usage=daily_usage,
+        by_model=by_model
+    )

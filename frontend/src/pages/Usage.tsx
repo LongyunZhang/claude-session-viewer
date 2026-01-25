@@ -1,0 +1,261 @@
+import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { ArrowLeft, Activity, Calendar, Cpu } from 'lucide-react';
+import { getUsageDetail, getUsageSummary, type UsageDetail, type UsageSummary } from '../lib/api';
+
+function formatTokens(num: number): string {
+  if (num >= 1_000_000) {
+    return (num / 1_000_000).toFixed(2) + 'M';
+  }
+  if (num >= 1_000) {
+    return (num / 1_000).toFixed(1) + 'K';
+  }
+  return num.toLocaleString();
+}
+
+function formatCost(cost: number): string {
+  return '$' + cost.toFixed(4);
+}
+
+function formatDate(dateStr: string): string {
+  return dateStr; // 直接返回 YYYY-MM-DD 格式
+}
+
+function formatModelName(model: string): string {
+  // claude-opus-4-5-20251101 -> Opus 4.5
+  // claude-sonnet-4-5-20250929 -> Sonnet 4.5
+  // claude-3-5-haiku-20241022 -> Haiku 3.5
+  if (model.includes('opus-4-5')) return 'Opus 4.5';
+  if (model.includes('sonnet-4-5')) return 'Sonnet 4.5';
+  if (model.includes('sonnet-4-')) return 'Sonnet 4';
+  if (model.includes('haiku')) return 'Haiku';
+  if (model.includes('opus')) return 'Opus';
+  if (model.includes('sonnet')) return 'Sonnet';
+  return model;
+}
+
+export function Usage() {
+  const [summary, setSummary] = useState<UsageSummary | null>(null);
+  const [detail, setDetail] = useState<UsageDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState(30);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const [summaryData, detailData] = await Promise.all([
+          getUsageSummary(),
+          getUsageDetail(days),
+        ]);
+        setSummary(summaryData);
+        setDetail(detailData);
+      } catch (error) {
+        console.error('Failed to load usage data:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [days]);
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* 头部 */}
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
+        <div className="max-w-6xl mx-auto px-4 py-4">
+          <div className="flex items-center gap-4">
+            <Link
+              to="/"
+              className="p-2 -ml-2 rounded-lg hover:bg-gray-100 text-gray-600"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+            <div className="flex items-center gap-2">
+              <Activity className="w-5 h-5 text-orange-500" />
+              <h1 className="text-xl font-semibold text-gray-900">
+                Token 使用统计
+              </h1>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="max-w-6xl mx-auto px-4 py-6">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-600"></div>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {/* 摘要卡片 */}
+            {summary && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white rounded-lg border border-gray-200 p-5">
+                  <div className="text-sm text-gray-500 mb-1">今日用量</div>
+                  <div className="text-2xl font-semibold text-gray-900">
+                    {formatTokens(summary.today.total_tokens)}
+                  </div>
+                  <div className="text-sm text-orange-600 mt-1">
+                    {formatCost(summary.today.cost_usd)}
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-lg border border-gray-200 p-5">
+                  <div className="text-sm text-gray-500 mb-1">本月用量</div>
+                  <div className="text-2xl font-semibold text-gray-900">
+                    {formatTokens(summary.this_month.total_tokens)}
+                  </div>
+                  <div className="text-sm text-orange-600 mt-1">
+                    {formatCost(summary.this_month.cost_usd)}
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-lg border border-gray-200 p-5">
+                  <div className="text-sm text-gray-500 mb-1">总计用量</div>
+                  <div className="text-2xl font-semibold text-gray-900">
+                    {formatTokens(summary.total.total_tokens)}
+                  </div>
+                  <div className="text-sm text-orange-600 mt-1">
+                    {formatCost(summary.total.cost_usd)}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 按模型统计 */}
+            {detail && Object.keys(detail.by_model).length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <div className="px-5 py-4 border-b border-gray-200">
+                  <h2 className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                    <Cpu className="w-4 h-4" />
+                    按模型统计
+                  </h2>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
+                      <tr>
+                        <th className="text-left px-5 py-3 font-medium">模型</th>
+                        <th className="text-right px-5 py-3 font-medium">Input</th>
+                        <th className="text-right px-5 py-3 font-medium">Output</th>
+                        <th className="text-right px-5 py-3 font-medium">Cache Create</th>
+                        <th className="text-right px-5 py-3 font-medium">Cache Read</th>
+                        <th className="text-right px-5 py-3 font-medium">Total</th>
+                        <th className="text-right px-5 py-3 font-medium">Cost</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {Object.entries(detail.by_model)
+                        .sort((a, b) => b[1].total_tokens - a[1].total_tokens)
+                        .map(([model, data]) => (
+                          <tr key={model} className="hover:bg-gray-50">
+                            <td className="px-5 py-3 font-medium text-gray-900">{formatModelName(model)}</td>
+                            <td className="px-5 py-3 text-right text-gray-600">
+                              {formatTokens(data.input_tokens)}
+                            </td>
+                            <td className="px-5 py-3 text-right text-gray-600">
+                              {formatTokens(data.output_tokens)}
+                            </td>
+                            <td className="px-5 py-3 text-right text-gray-600">
+                              {formatTokens(data.cache_creation_tokens)}
+                            </td>
+                            <td className="px-5 py-3 text-right text-gray-600">
+                              {formatTokens(data.cache_read_tokens)}
+                            </td>
+                            <td className="px-5 py-3 text-right font-medium text-gray-900">
+                              {formatTokens(data.total_tokens)}
+                            </td>
+                            <td className="px-5 py-3 text-right text-orange-600">
+                              {formatCost(data.cost_usd)}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* 每日统计 */}
+            {detail && detail.daily_usage.length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+                  <h2 className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                    <Calendar className="w-4 h-4" />
+                    每日统计
+                  </h2>
+                  <select
+                    value={days}
+                    onChange={(e) => setDays(Number(e.target.value))}
+                    className="text-sm border border-gray-300 rounded px-2 py-1"
+                  >
+                    <option value={7}>最近 7 天</option>
+                    <option value={30}>最近 30 天</option>
+                    <option value={90}>最近 90 天</option>
+                    <option value={365}>最近 1 年</option>
+                  </select>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
+                      <tr>
+                        <th className="text-left px-5 py-3 font-medium">日期</th>
+                        <th className="text-left px-5 py-3 font-medium">模型</th>
+                        <th className="text-right px-5 py-3 font-medium">Input</th>
+                        <th className="text-right px-5 py-3 font-medium">Output</th>
+                        <th className="text-right px-5 py-3 font-medium">Cache Create</th>
+                        <th className="text-right px-5 py-3 font-medium">Cache Read</th>
+                        <th className="text-right px-5 py-3 font-medium">Total</th>
+                        <th className="text-right px-5 py-3 font-medium">Cost</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {detail.daily_usage.map((day) => (
+                        <tr key={day.date} className="hover:bg-gray-50">
+                          <td className="px-5 py-3 font-medium text-gray-900 whitespace-nowrap">
+                            {formatDate(day.date)}
+                          </td>
+                          <td className="px-5 py-3 text-gray-600">
+                            <div className="flex flex-wrap gap-1">
+                              {day.models.map((model) => (
+                                <span
+                                  key={model}
+                                  className="px-1.5 py-0.5 bg-gray-100 rounded text-xs"
+                                >
+                                  {formatModelName(model)}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-5 py-3 text-right text-gray-600">
+                            {formatTokens(day.input_tokens)}
+                          </td>
+                          <td className="px-5 py-3 text-right text-gray-600">
+                            {formatTokens(day.output_tokens)}
+                          </td>
+                          <td className="px-5 py-3 text-right text-gray-600">
+                            {formatTokens(day.cache_creation_tokens)}
+                          </td>
+                          <td className="px-5 py-3 text-right text-gray-600">
+                            {formatTokens(day.cache_read_tokens)}
+                          </td>
+                          <td className="px-5 py-3 text-right font-medium text-gray-900">
+                            {formatTokens(day.total_tokens)}
+                          </td>
+                          <td className="px-5 py-3 text-right text-orange-600">
+                            {formatCost(day.cost_usd)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
