@@ -5,13 +5,6 @@ import { getUsageSummary, type UsageSummary, type SourceFilter } from '../lib/ap
 
 // 模块级缓存，页面导航时保持数据
 const cachedUsage: Record<string, UsageSummary | null> = {};
-const cacheTime: Record<string, number> = {};
-const CACHE_DURATION = 10 * 60 * 1000; // 10 分钟缓存有效期
-
-function isCacheValid(source: SourceFilter): boolean {
-  return cachedUsage[source] !== undefined && cachedUsage[source] !== null &&
-    (Date.now() - (cacheTime[source] || 0)) < CACHE_DURATION;
-}
 
 function formatTokens(num: number): string {
   if (num >= 1_000_000) {
@@ -32,13 +25,13 @@ interface UsageStatsProps {
 }
 
 export function UsageStats({ source }: UsageStatsProps) {
-  const [usage, setUsage] = useState<UsageSummary | null>(isCacheValid(source) ? (cachedUsage[source] || null) : null);
+  const [usage, setUsage] = useState<UsageSummary | null>(cachedUsage[source] || null);
   const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(isCacheValid(source));
+  const [loaded, setLoaded] = useState(Boolean(cachedUsage[source]));
 
   useEffect(() => {
-    setUsage(isCacheValid(source) ? (cachedUsage[source] || null) : null);
-    setLoaded(isCacheValid(source));
+    setUsage(cachedUsage[source] || null);
+    setLoaded(Boolean(cachedUsage[source]));
   }, [source]);
 
   const handleLoad = async () => {
@@ -46,7 +39,6 @@ export function UsageStats({ source }: UsageStatsProps) {
     try {
       const data = await getUsageSummary(source);
       cachedUsage[source] = data; // 更新缓存
-      cacheTime[source] = Date.now(); // 记录缓存时间
       setUsage(data);
       setLoaded(true);
     } catch (error) {
@@ -56,33 +48,12 @@ export function UsageStats({ source }: UsageStatsProps) {
     }
   };
 
-  // 未加载状态 - 显示加载按钮
-  if (!loaded && !loading) {
-    return (
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Activity className="w-4 h-4 text-orange-500" />
-            <span className="text-sm font-medium text-gray-700">Token 统计</span>
-          </div>
-          <Link
-            to={`/usage?source=${source}`}
-            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-0.5"
-          >
-            详情
-            <ChevronRight className="w-3 h-3" />
-          </Link>
-        </div>
-        <button
-          onClick={handleLoad}
-          className="w-full py-2 px-3 text-sm text-gray-600 bg-gray-50 hover:bg-gray-100 rounded border border-gray-200 flex items-center justify-center gap-2"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          点击加载统计
-        </button>
-      </div>
-    );
-  }
+  // 首次进入自动加载
+  useEffect(() => {
+    if (!loaded && !loading) {
+      handleLoad();
+    }
+  }, [loaded, loading, source]);
 
   // 加载中状态
   if (loading) {

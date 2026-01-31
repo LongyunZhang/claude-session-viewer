@@ -4,7 +4,7 @@
 
 const API_BASE = '/api';
 
-export type SourceFilter = 'claude' | 'codex';
+export type SourceFilter = 'claude' | 'codex' | 'gemini';
 
 export interface SessionSummary {
   id: string;

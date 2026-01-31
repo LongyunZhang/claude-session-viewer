@@ -32,7 +32,7 @@ export function Home() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>(() => {
     const saved = localStorage.getItem(SOURCE_FILTER_KEY);
-    return (saved === 'claude' || saved === 'codex') ? saved : 'claude';
+    return (saved === 'claude' || saved === 'codex' || saved === 'gemini') ? saved : 'claude';
   });
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const saved = localStorage.getItem(VIEW_MODE_KEY);
@@ -125,7 +125,7 @@ export function Home() {
                 <path d="M16 9V13.5L19 15.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
               <h1 className="text-xl font-semibold text-gray-900">
-                {sourceFilter === 'codex' ? 'Codex CLI 会话历史' : 'Claude Code 会话历史'}
+                {sourceFilter === 'codex' ? 'Codex CLI 会话历史' : (sourceFilter === 'gemini' ? 'Gemini CLI 会话历史' : 'Claude Code 会话历史')}
               </h1>
             </div>
             <div className="flex items-center gap-2">
@@ -151,6 +151,17 @@ export function Home() {
                   )}
                 >
                   Codex
+                </button>
+                <button
+                  onClick={() => handleSourceChange('gemini')}
+                  className={cn(
+                    "px-3 py-1 text-sm rounded",
+                    sourceFilter === 'gemini'
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-500 hover:text-gray-700"
+                  )}
+                >
+                  Gemini
                 </button>
               </div>
               <div className="text-sm text-gray-500">
@@ -271,7 +282,7 @@ export function Home() {
                               ? "bg-blue-100 text-blue-700"
                               : "bg-orange-100 text-orange-700"
                           )}>
-                            {result.message_type === 'user' ? '用户' : (result.source === 'codex' ? 'Codex' : 'Claude')}
+                            {result.message_type === 'user' ? '用户' : (result.source === 'codex' ? 'Codex' : (result.source === 'gemini' ? 'Gemini' : 'Claude'))}
                           </span>
                           {result.source && (
                             <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">

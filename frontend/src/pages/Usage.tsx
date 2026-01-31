@@ -46,9 +46,9 @@ export function Usage() {
   const requestIdRef = useRef(0);
   const [source, setSource] = useState<SourceFilter>(() => {
     const param = searchParams.get('source');
-    if (param === 'claude' || param === 'codex') return param;
+    if (param === 'claude' || param === 'codex' || param === 'gemini') return param;
     const saved = localStorage.getItem(SOURCE_FILTER_KEY);
-    return (saved === 'claude' || saved === 'codex') ? saved : 'claude';
+    return (saved === 'claude' || saved === 'codex' || saved === 'gemini') ? saved : 'claude';
   });
 
   const handleSourceChange = (next: SourceFilter) => {
@@ -59,7 +59,7 @@ export function Usage() {
 
   useEffect(() => {
     const param = searchParams.get('source');
-    if (param === 'claude' || param === 'codex') {
+    if (param === 'claude' || param === 'codex' || param === 'gemini') {
       if (param !== source) {
         setSource(param);
         localStorage.setItem(SOURCE_FILTER_KEY, param);
@@ -132,6 +132,17 @@ export function Usage() {
                 )}
               >
                 Codex
+              </button>
+              <button
+                onClick={() => handleSourceChange('gemini')}
+                className={cn(
+                  "px-3 py-1 text-sm rounded",
+                  source === 'gemini'
+                    ? "bg-white text-gray-900 shadow-sm"
+                    : "text-gray-500 hover:text-gray-700"
+                )}
+              >
+                Gemini
               </button>
             </div>
             <a

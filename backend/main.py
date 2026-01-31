@@ -33,7 +33,7 @@ def root():
 @app.get("/api/sessions", response_model=List[SessionSummary])
 def list_sessions(
     project: Optional[str] = Query(None, description="按项目路径筛选"),
-    source: Optional[str] = Query("claude", description="数据来源: claude/codex"),
+    source: Optional[str] = Query("claude", description="数据来源: claude/codex/gemini"),
     limit: int = Query(100, ge=1, le=500, description="返回数量限制")
 ):
     """获取会话列表"""
@@ -49,7 +49,7 @@ def list_sessions(
 @app.get("/api/sessions/{session_id}", response_model=SessionDetail)
 def get_session(
     session_id: str,
-    source: Optional[str] = Query("claude", description="数据来源: claude/codex")
+    source: Optional[str] = Query("claude", description="数据来源: claude/codex/gemini")
 ):
     """获取会话详情"""
     session = get_session_detail(session_id, source)
@@ -61,7 +61,7 @@ def get_session(
 @app.get("/api/sessions/{session_id}/context")
 def get_session_context(
     session_id: str,
-    source: Optional[str] = Query("claude", description="数据来源: claude/codex")
+    source: Optional[str] = Query("claude", description="数据来源: claude/codex/gemini"),
 ):
     """获取压缩后的会话上下文，用于继续对话"""
     session = get_session_detail(session_id, source)
@@ -75,7 +75,7 @@ def get_session_context(
 @app.get("/api/search", response_model=List[SearchResult])
 def search(
     q: str = Query(..., min_length=1, description="搜索关键词"),
-    source: Optional[str] = Query("claude", description="数据来源: claude/codex"),
+    source: Optional[str] = Query("claude", description="数据来源: claude/codex/gemini"),
     limit: int = Query(50, ge=1, le=200, description="返回数量限制")
 ):
     """全文搜索"""
@@ -86,7 +86,7 @@ def search(
 
 @app.get("/api/projects", response_model=List[Project])
 def list_projects(
-    source: Optional[str] = Query("claude", description="数据来源: claude/codex")
+    source: Optional[str] = Query("claude", description="数据来源: claude/codex/gemini")
 ):
     """获取项目列表"""
     return get_all_projects(source)
@@ -94,7 +94,7 @@ def list_projects(
 
 @app.get("/api/usage/summary", response_model=UsageSummary)
 def usage_summary(
-    source: Optional[str] = Query("claude", description="数据来源: claude/codex")
+    source: Optional[str] = Query("claude", description="数据来源: claude/codex/gemini")
 ):
     """获取使用量摘要：今日、本月、总计"""
     return get_usage_summary(source)
@@ -103,7 +103,7 @@ def usage_summary(
 @app.get("/api/usage/detail", response_model=UsageDetail)
 def usage_detail(
     days: int = Query(30, ge=1, le=365, description="统计天数"),
-    source: Optional[str] = Query("claude", description="数据来源: claude/codex")
+    source: Optional[str] = Query("claude", description="数据来源: claude/codex/gemini"),
 ):
     """获取详细使用量统计"""
     return get_usage_detail(days, source)
