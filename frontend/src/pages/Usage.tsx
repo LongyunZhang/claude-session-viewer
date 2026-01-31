@@ -145,14 +145,31 @@ export function Usage() {
                 Gemini
               </button>
             </div>
-            <a
-              href="https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ml-auto text-xs text-gray-400 hover:text-gray-600"
-            >
-              定价来源: LiteLLM (2026-01-26)
-            </a>
+            {source === 'claude' && (
+              <a
+                href="https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ml-auto text-xs text-gray-400 hover:text-gray-600"
+              >
+                定价来源: LiteLLM (2026-01-26)
+              </a>
+            )}
+            {source === 'codex' && (
+              <a
+                href="https://platform.openai.com/docs/pricing"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ml-auto text-xs text-gray-400 hover:text-gray-600"
+              >
+                定价来源: OpenAI Pricing
+              </a>
+            )}
+            {source === 'gemini' && (
+              <span className="ml-auto text-xs text-gray-400">
+                定价来源: 暂无（仅统计 token）
+              </span>
+            )}
           </div>
         </div>
       </header>

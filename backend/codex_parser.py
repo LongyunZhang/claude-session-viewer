@@ -1,5 +1,6 @@
 """JSONL 解析器 - 解析 Codex 会话数据"""
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -19,6 +20,39 @@ CODEX_SESSIONS_DIR = CODEX_DIR / "sessions"
 CODEX_TOOL_NAME_MAP = {
     "shell_command": "Bash",
     "apply_patch": "Edit",
+}
+
+# Codex 定价（每百万 tokens，美元）
+# 数据来源：
+# - codex-mini-latest: https://platform.openai.com/docs/models/codex-mini-latest
+# - gpt-5-codex: https://platform.openai.com/docs/models/gpt-5-codex
+CODEX_DEFAULT_MODEL = os.environ.get("CODEX_DEFAULT_MODEL", "codex-mini-latest")
+CODEX_PRICING = {
+    "codex-mini-latest": {
+        "input": 1.50,
+        "cached_input": 0.375,
+        "output": 6.00,
+    },
+    "gpt-5.2-codex": {
+        "input": 1.75,
+        "cached_input": 0.175,
+        "output": 14.00,
+    },
+    "gpt-5.1-codex-max": {
+        "input": 1.25,
+        "cached_input": 0.125,
+        "output": 10.00,
+    },
+    "gpt-5.1-codex": {
+        "input": 1.25,
+        "cached_input": 0.125,
+        "output": 10.00,
+    },
+    "gpt-5-codex": {
+        "input": 1.25,
+        "cached_input": 0.125,
+        "output": 10.00,
+    },
 }
 
 
@@ -357,6 +391,50 @@ def _extract_token_event(record: dict) -> Optional[dict]:
     return last_usage
 
 
+def _extract_model_name(record: dict) -> Optional[str]:
+    if record.get("type") == "session_meta":
+        payload = record.get("payload") or {}
+        for key in ("model", "model_name", "model_id"):
+            value = payload.get(key)
+            if value:
+                return value
+    if record.get("type") == "event_msg":
+        payload = record.get("payload") or {}
+        info = payload.get("info") or {}
+        for key in ("model", "model_name", "model_id"):
+            value = info.get(key)
+            if value:
+                return value
+    return None
+
+
+def _normalize_codex_model_name(model: Optional[str]) -> str:
+    if not model:
+        return CODEX_DEFAULT_MODEL
+    return model
+
+
+def _get_codex_pricing(model: Optional[str]) -> dict:
+    model_name = _normalize_codex_model_name(model)
+    if model_name in CODEX_PRICING:
+        return CODEX_PRICING[model_name]
+    # 模糊匹配（比如带前缀）
+    for key in CODEX_PRICING:
+        if key in model_name:
+            return CODEX_PRICING[key]
+    return CODEX_PRICING[CODEX_DEFAULT_MODEL]
+
+
+def _calculate_codex_cost(input_tokens: int, cached_input_tokens: int, output_tokens: int, model: Optional[str]) -> float:
+    pricing = _get_codex_pricing(model)
+    cost = (
+        (input_tokens / 1_000_000) * pricing["input"] +
+        (cached_input_tokens / 1_000_000) * pricing["cached_input"] +
+        (output_tokens / 1_000_000) * pricing["output"]
+    )
+    return cost
+
+
 def get_codex_usage_summary() -> UsageSummary:
     """获取 Codex 使用量摘要：今日、本月、总计"""
     from datetime import timezone
@@ -392,20 +470,25 @@ def get_codex_usage_summary() -> UsageSummary:
             input_tokens = last_usage.get("input_tokens", 0)
             output_tokens = last_usage.get("output_tokens", 0)
             cache_read = last_usage.get("cached_input_tokens", 0)
+            model = _normalize_codex_model_name(_extract_model_name(record))
+            cost = _calculate_codex_cost(input_tokens, cache_read, output_tokens, model)
 
             total_usage.input_tokens += input_tokens
             total_usage.output_tokens += output_tokens
             total_usage.cache_read_tokens += cache_read
+            total_usage.cost_usd += cost
 
             if ts_date >= first_of_month:
                 month_usage.input_tokens += input_tokens
                 month_usage.output_tokens += output_tokens
                 month_usage.cache_read_tokens += cache_read
+                month_usage.cost_usd += cost
 
             if ts_date == today:
                 today_usage.input_tokens += input_tokens
                 today_usage.output_tokens += output_tokens
                 today_usage.cache_read_tokens += cache_read
+                today_usage.cost_usd += cost
 
     for usage in (today_usage, month_usage, total_usage):
         usage.total_tokens = (
@@ -471,19 +554,22 @@ def get_codex_usage_detail(days: int = 30) -> UsageDetail:
                 continue
 
             date_str = ts_date.isoformat()
-            model = "codex"
+            model = _normalize_codex_model_name(_extract_model_name(record))
             input_tokens = last_usage.get("input_tokens", 0)
             output_tokens = last_usage.get("output_tokens", 0)
             cache_read = last_usage.get("cached_input_tokens", 0)
+            cost = _calculate_codex_cost(input_tokens, cache_read, output_tokens, model)
 
             daily_data[date_str]["models"].add(model)
             daily_data[date_str]["input_tokens"] += input_tokens
             daily_data[date_str]["output_tokens"] += output_tokens
             daily_data[date_str]["cache_read_tokens"] += cache_read
+            daily_data[date_str]["cost_usd"] += cost
 
             model_data[model]["input_tokens"] += input_tokens
             model_data[model]["output_tokens"] += output_tokens
             model_data[model]["cache_read_tokens"] += cache_read
+            model_data[model]["cost_usd"] += cost
 
     daily_usage = []
     for date_str, data in sorted(daily_data.items(), reverse=True):
