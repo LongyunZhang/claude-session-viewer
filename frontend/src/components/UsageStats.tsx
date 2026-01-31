@@ -1,15 +1,16 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, ChevronRight, RefreshCw } from 'lucide-react';
-import { getUsageSummary, type UsageSummary } from '../lib/api';
+import { getUsageSummary, type UsageSummary, type SourceFilter } from '../lib/api';
 
 // 模块级缓存，页面导航时保持数据
-let cachedUsage: UsageSummary | null = null;
-let cacheTime: number = 0;
+const cachedUsage: Record<string, UsageSummary | null> = {};
+const cacheTime: Record<string, number> = {};
 const CACHE_DURATION = 10 * 60 * 1000; // 10 分钟缓存有效期
 
-function isCacheValid(): boolean {
-  return cachedUsage !== null && (Date.now() - cacheTime) < CACHE_DURATION;
+function isCacheValid(source: SourceFilter): boolean {
+  return cachedUsage[source] !== undefined && cachedUsage[source] !== null &&
+    (Date.now() - (cacheTime[source] || 0)) < CACHE_DURATION;
 }
 
 function formatTokens(num: number): string {
@@ -26,17 +27,26 @@ function formatCost(cost: number): string {
   return '$' + cost.toFixed(2);
 }
 
-export function UsageStats() {
-  const [usage, setUsage] = useState<UsageSummary | null>(isCacheValid() ? cachedUsage : null);
+interface UsageStatsProps {
+  source: SourceFilter;
+}
+
+export function UsageStats({ source }: UsageStatsProps) {
+  const [usage, setUsage] = useState<UsageSummary | null>(isCacheValid(source) ? (cachedUsage[source] || null) : null);
   const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(isCacheValid());
+  const [loaded, setLoaded] = useState(isCacheValid(source));
+
+  useEffect(() => {
+    setUsage(isCacheValid(source) ? (cachedUsage[source] || null) : null);
+    setLoaded(isCacheValid(source));
+  }, [source]);
 
   const handleLoad = async () => {
     setLoading(true);
     try {
-      const data = await getUsageSummary();
-      cachedUsage = data; // 更新缓存
-      cacheTime = Date.now(); // 记录缓存时间
+      const data = await getUsageSummary(source);
+      cachedUsage[source] = data; // 更新缓存
+      cacheTime[source] = Date.now(); // 记录缓存时间
       setUsage(data);
       setLoaded(true);
     } catch (error) {
@@ -56,7 +66,7 @@ export function UsageStats() {
             <span className="text-sm font-medium text-gray-700">Token 统计</span>
           </div>
           <Link
-            to="/usage"
+            to={`/usage?source=${source}`}
             className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-0.5"
           >
             详情
@@ -109,7 +119,7 @@ export function UsageStats() {
           </button>
         </div>
         <Link
-          to="/usage"
+          to={`/usage?source=${source}`}
           className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-0.5"
         >
           详情
